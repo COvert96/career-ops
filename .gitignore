@@ -45,3 +45,10 @@ bun.lock
 .claude/memory/
 career-dashboard
 package-lock.json
+
+# Playwright generated artifacts
+.playwright-cli/
+.playwright-mcp/
+.playwright/
+playwright-report/
+test-results/
