@@ -3,10 +3,13 @@
  * normalize-statuses.mjs — Clean non-canonical states in applications.md
  *
  * Maps all non-canonical statuses to canonical ones per states.yml:
- *   Evaluada, Aplicado, Respondido, Entrevista, Oferta, Rechazado, Descartado, NO APLICAR
+ *   Evaluated, Applied, Responded, Interview, Offer, Rejected, Discarded, SKIP
+ *
+ * Legacy Spanish labels (Evaluada, Aplicado, Rechazado, Descartado, ...) are
+ * accepted as input aliases and rewritten to the English canonicals above.
  *
  * Also strips markdown bold (**) and dates from the status field,
- * moving DUPLICADO info to the notes column.
+ * moving duplicate-marker info to the notes column.
  *
  * Run: node career-ops/normalize-statuses.mjs [--dry-run]
  */

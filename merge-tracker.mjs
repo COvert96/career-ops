@@ -268,7 +268,9 @@ const existingApps = [];
 let maxNum = 0;
 
 for (const line of appLines) {
-  if (line.startsWith('|') && !line.includes('---') && !line.includes('Empresa')) {
+  // Skip the separator row and the header row. The tracker header says "Company";
+  // "Empresa" is kept as a fallback for pre-translation tracker files.
+  if (line.startsWith('|') && !line.includes('---') && !line.includes('Company') && !line.includes('Empresa')) {
     const app = parseAppLine(line);
     if (app) {
       existingApps.push(app);

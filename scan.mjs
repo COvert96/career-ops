@@ -189,32 +189,43 @@ function loadSeenCompanyRoles() {
 
 // ── Pipeline writer ─────────────────────────────────────────────────
 
+// Section markers, English first. The Spanish variants are legacy fallbacks for
+// pipeline.md files created before the English translation — reading stays
+// tolerant, writing always emits English. Mirrors the upstream v1.27 design
+// (PENDING_MARKERS / PROCESSED_MARKERS) so this patch converges on update.
+const PENDING_MARKERS = ['## Pending', '## Pendientes'];
+const PROCESSED_MARKERS = ['## Processed', '## Procesadas'];
+
+function findMarker(text, markers) {
+  for (const marker of markers) {
+    const idx = text.indexOf(marker);
+    if (idx !== -1) return { marker, idx };
+  }
+  return null;
+}
+
 function appendToPipeline(offers) {
   if (offers.length === 0) return;
 
   let text = readFileSync(PIPELINE_PATH, 'utf-8');
 
-  // Find "## Pendientes" section and append after it
-  const marker = '## Pendientes';
-  const idx = text.indexOf(marker);
-  if (idx === -1) {
-    // No Pendientes section — append at end before Procesadas
-    const procIdx = text.indexOf('## Procesadas');
-    const insertAt = procIdx === -1 ? text.length : procIdx;
-    const block = `\n${marker}\n\n` + offers.map(o =>
-      `- [ ] ${o.url} | ${o.company} | ${o.title}`
-    ).join('\n') + '\n\n';
+  const formatted = offers.map(o =>
+    `- [ ] ${o.url} | ${o.company} | ${o.title}`
+  ).join('\n');
+
+  const pending = findMarker(text, PENDING_MARKERS);
+  if (!pending) {
+    // No pending section — insert one before the processed section (or at end).
+    const processed = findMarker(text, PROCESSED_MARKERS);
+    const insertAt = processed ? processed.idx : text.length;
+    const block = `\n${PENDING_MARKERS[0]}\n\n${formatted}\n\n`;
     text = text.slice(0, insertAt) + block + text.slice(insertAt);
   } else {
-    // Find the end of existing Pendientes content (next ## or end)
-    const afterMarker = idx + marker.length;
+    // Append to the end of the existing pending content (next ## or EOF).
+    const afterMarker = pending.idx + pending.marker.length;
     const nextSection = text.indexOf('\n## ', afterMarker);
     const insertAt = nextSection === -1 ? text.length : nextSection;
-
-    const block = '\n' + offers.map(o =>
-      `- [ ] ${o.url} | ${o.company} | ${o.title}`
-    ).join('\n') + '\n';
-    text = text.slice(0, insertAt) + block + text.slice(insertAt);
+    text = text.slice(0, insertAt) + '\n' + formatted + '\n' + text.slice(insertAt);
   }
 
   writeFileSync(PIPELINE_PATH, text, 'utf-8');

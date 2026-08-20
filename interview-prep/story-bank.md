@@ -4,7 +4,7 @@ This file accumulates your best interview stories over time. Each evaluation (Bl
 
 ## How it works
 
-1. Every time `/career-ops oferta` generates Block F (Interview Plan), new STAR+R stories get appended here
+1. Every time `/career-ops offer` generates Block F (Interview Plan), new STAR+R stories get appended here
 2. Before your next interview, review this file — your stories are already organized by theme
 3. The "Big Three" questions can be answered with stories from this bank:
    - "Tell me about yourself" → combine 2-3 stories into a narrative
@@ -77,3 +77,80 @@ This file accumulates your best interview stories over time. Each evaluation (Bl
 **R:** All 3 systems remediated; zero incidents during migration.
 **Reflection:** Security debt is invisible until it isn't. Document the before-state explicitly so the organisation retains institutional memory of why the control exists.
 **Best for questions about:** production reliability, security engineering, risk management, high-quality standards, working under pressure
+
+---
+
+### [Adoption / Change Management] PowerShell to CI/CD Automation
+**Source:** Report #005 — One Acre Fund — Tupande AI Engineering Lead
+**S:** Critical data jobs at MSF ran as ad-hoc PowerShell scripts on individual engineers' machines — no version control, no repeatable deployment.
+**T:** Turn tribal scripts into governed infrastructure without stalling the team's delivery.
+**A:** Rewrote the scripts as version-controlled Databricks jobs with Terraform IaC and CI/CD deployment; migrated the team's working habits alongside the code, not after it.
+**R:** Manual deployments eliminated; operational risk removed from active humanitarian data flows.
+**Reflection:** The technical migration took weeks; the behaviour change took months. Adoption is the real deliverable — budget for it explicitly instead of treating it as a rollout afterthought.
+**Best for questions about:** organizational adoption, change management, automation, championing new tooling, influencing without authority, infrastructure as code
+
+---
+
+### [Governance / Standards] AI and Data Governance Model
+**Source:** Report #005 — One Acre Fund — Tupande AI Engineering Lead
+**S:** MSF's AI and data pipelines ran across globally distributed infrastructure with no coherent access-control or data-governance model.
+**T:** Design RBAC and governance that met enterprise security requirements without blocking field teams who needed the data.
+**A:** Built a custom RBAC model and data-governance framework covering AI and data pipelines; designed it with the teams who would work under it rather than handing it down.
+**R:** Compliance achieved with enterprise security requirements across globally distributed infrastructure.
+**Reflection:** Governance designed *with* the people who live under it gets followed; governance handed down gets routed around. The technical model was the easy half.
+**Best for questions about:** AI governance, establishing standards, RBAC and access control, data governance, compliance, balancing control with usability
+
+---
+
+### [Forward Deployed / Adoption] Egypt Field QA Tooling
+**Source:** Report #006 — IFS — Forward Deployed AI Engineer
+**S:** Field coordinators in Egypt depended on MSF translation output for operational work but had no way to judge whether it was trustworthy.
+**T:** Give non-engineers a way to evaluate model quality themselves, without ML knowledge and without routing every question through engineering.
+**A:** Built QA tooling that surfaced quality signals in operational terms rather than as BLEU scores; designed it around what coordinators actually needed to decide, not around what the model emitted.
+**R:** Coordinators independently evaluated translation quality; the review bottleneck came off the engineering team.
+**Reflection:** The hardest part was never the models. It was helping field teams understand where the system was reliable — and that is a product problem, not a modelling one.
+**Best for questions about:** forward-deployed work, customer-facing engineering, non-technical users, human-in-the-loop, driving adoption, translating technical output into business terms
+
+---
+
+### [Enablement / Handoff] MSF Python Enablement and AI Guidelines
+**Source:** Report #006 — IFS — Forward Deployed AI Engineer
+**S:** Semi-technical MSF staff depended on engineering for analysis work they were capable of doing themselves, and the organisation had no shared position on how AI should be used.
+**T:** Transfer capability instead of accumulating dependency, and help set the guardrails.
+**A:** Ran Python training sessions for semi-technical staff; contributed to shaping organisational AI usage guidelines.
+**R:** Staff self-served on work that previously queued behind engineering; the guidelines gave the org a consistent position on AI use.
+**Reflection:** Handoff is a design decision, not a final phase. If you build it so only you can run it, you have not finished.
+**Best for questions about:** enablement, mentorship, knowledge transfer, customer handoff, AI governance and policy, influencing without authority
+
+---
+
+### [Integration / Delivery Speed] Dropshirt Enterprise Integration Layer
+**Source:** Report #006 — IFS — Forward Deployed AI Engineer
+**S:** Merchants needed to connect existing commerce stacks to the Dropshirt platform, and onboarding was the growth bottleneck.
+**T:** Make third-party integration fast and repeatable rather than bespoke per merchant.
+**A:** Integrated Mollie, Shopify, and WooCommerce; built a common abstraction over inconsistent third-party APIs so each new merchant was configuration rather than code.
+**R:** Merchant onboarding time cut to under 24 hours.
+**Reflection:** Every vendor's sandbox lies. Budget integration time for the gap between the documentation and production behaviour, not for the happy path.
+**Best for questions about:** enterprise API integration, middleware, delivery speed, reducing onboarding friction, working around third-party constraints
+
+---
+
+### [Orchestration / Guardrails] Trading Platform Multi-Stage Orchestration
+**Source:** Report #006 — IFS — Forward Deployed AI Engineer
+**S:** An automated equity trading pipeline needed to make decisions that no single model should be trusted to make unsupervised.
+**T:** Orchestrate signal generation, risk validation, and code-quality enforcement with guardrails that actually held.
+**A:** Designed explicit hand-offs between stages with evaluation checkpoints at each boundary; enforced code quality automatically through SonarQube and Radon; added scheduled retraining and performance monitoring.
+**R:** A live pipeline safe enough to leave running unattended.
+**Reflection:** Guardrails are cheaper than recovery. The checkpoints that felt like overhead in week one are exactly what made it safe to walk away from.
+**Best for questions about:** multi-agent orchestration, human-in-the-loop design, guardrails and safety, automated evaluation checkpoints, production ML reliability
+
+---
+
+### [Stakeholder Influence] Talaria: Engineer to Business Lead
+**Source:** Report #005 — One Acre Fund — Tupande AI Engineering Lead
+**S:** The Boeing GoFly eVTOL program had a credible technical concept but needed funding and external partners to keep going.
+**T:** Move from leading the powertrain build to owning partnerships and roadmap as the programme scaled.
+**A:** Led 10+ engineers across powertrain and controls to deliver sub-systems in 12 months, then pivoted to driving cross-team coordination and external stakeholder alignment.
+**R:** Competitive eVTOL prototype delivered; €50k in sponsorship funding secured.
+**Reflection:** Technical credibility is what makes stakeholder influence stick. The pivot only worked because I had built the thing first — the partners were buying a demonstrated system, not a pitch.
+**Best for questions about:** stakeholder influence, business acumen, IC-to-leadership transitions, cross-functional coordination, securing buy-in and funding, technical leadership at scale

@@ -47,7 +47,7 @@ npm run verify
 
 ## normalize
 
-Maps non-canonical statuses to their canonical equivalents and strips markdown bold and dates from the status column. Aliases like `Enviada` become `Aplicado`, `CERRADA` becomes `Descartado`, etc. DUPLICADO info is moved to the notes column.
+Maps non-canonical statuses to their canonical equivalents (per `templates/states.yml`) and strips markdown bold and dates from the status column. Legacy Spanish aliases are rewritten to English: `Enviada` and `Aplicado` become `Applied`, `CERRADA` and `Descartada` become `Discarded`, `Evaluada` becomes `Evaluated`. Duplicate-marker info is moved to the notes column.
 
 ```bash
 npm run normalize             # apply changes
