@@ -2,6 +2,20 @@
 /**
  * scan-wildlabs.mjs — Playwright scanner for the WILDLABS careers feed.
  *
+ * RETIRED 2026-08-22. The conservation-first career strategy this feed served
+ * was superseded (see modes/_profile.md § Superseded Strategy and
+ * careerops_implementation_handoff.md). The feed is dominated by ecology, GIS,
+ * bioacoustics and PhD/postdoc postings, which are anti-targets under the
+ * current software/data/platform strategy, and the scraper writes them into
+ * data/pipeline.md unfiltered.
+ *
+ * The Windows scheduled task `career-ops-wildlabs-scan` has been DISABLED
+ * (not deleted). The script still works if it is ever wanted again:
+ *   Re-enable schedule:  Enable-ScheduledTask -TaskName career-ops-wildlabs-scan
+ *   Disable again:       Disable-ScheduledTask -TaskName career-ops-wildlabs-scan
+ *   Remove entirely:     Unregister-ScheduledTask -TaskName career-ops-wildlabs-scan -Confirm:$false
+ *   One-off manual run:  node scripts-user/scan-wildlabs.mjs --dry-run
+ *
  * WILDLABS (wildlabs.net) is the highest-signal single source for conservation
  * technology roles. It aggregates postings from WCS, EarthRanger, NatureMetrics,
  * Wild Me, and the university research groups — most of which have no scannable

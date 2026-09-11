@@ -2,21 +2,37 @@
 
 This file accumulates your best interview stories over time. Each evaluation (Block F) adds new stories here. Instead of memorizing 100 answers, maintain 5-10 deep stories that you can bend to answer almost any behavioral question.
 
+**Rebuilt 2026-08-22** from the validated technical-evidence review in `careerops_implementation_handoff.md` § 13. Every story below is traceable to `cv.md`. The `**Caveats:**` line on each story lists what must NOT be claimed — those are as binding as the story itself, and several are enforced mechanically by `config/cv-facts.json`.
+
 ## How it works
 
 1. Every time `/career-ops offer` generates Block F (Interview Plan), new STAR+R stories get appended here
 2. Before your next interview, review this file — your stories are already organized by theme
-3. The "Big Three" questions can be answered with stories from this bank:
+3. `node match-star.mjs "<question>"` scores these stories against a behavioural question and formats the best match to ATS paste length
+4. The "Big Three" questions can be answered with stories from this bank:
    - "Tell me about yourself" → combine 2-3 stories into a narrative
    - "Tell me about your most impactful project" → pick your highest-impact story
    - "Tell me about a conflict you resolved" → find a story with a Reflection
 
+**Field labels matter.** `match-star.mjs` parses `**S (Situation):**` / `**T (Task):**` / `**A (Action):**` / `**R (Result):**` / `**Reflection:**` / `**Best for questions about:**`, one line each. A story written with short labels (`**S:**`) is invisible to the matcher.
+
+## Coverage map
+
+| Theme | Story |
+|-------|-------|
+| End-to-end system ownership · architecture trade-offs · performance · reliability | SharePoint Platform Modernization |
+| Reusable platform design · technical debt · security integration · influencing adoption | Reusable Authentication Modernization |
+| Pragmatic backend architecture · avoiding overengineering · delivery | Translation Backend |
+| Methodological ML judgement · failure · knowing when to stop | Trading System |
+| Failure and learning · risk · supplier verification · physical systems | Talaria Supplier Failure |
+| Technical leadership in a physical system · trade studies · delegation | Talaria Powertrain Architecture |
+| Vendor and technical governance · disagreement · escalation · ownership | Dropshirt Vendor Intervention |
+
 ## Stories
 
-<!-- Stories will be added here as you evaluate offers -->
-<!-- Format:
-### [Theme] Story Title
-**Source:** Report #NNN — Company — Role
+<!-- Format (indented one space so the parser does not read this comment as a story):
+ ### [Theme] Story Title
+ **Source:** Report #NNN — Company — Role
 **S (Situation):** ...
 **T (Task):** ...
 **A (Action):** ...
@@ -25,132 +41,90 @@ This file accumulates your best interview stories over time. Each evaluation (Bl
 **Best for questions about:** [list of question types this story answers]
 -->
 
-### [Impact / Agentic AI] MSF AI Translation Platform
-**Source:** Report #049 — Neno — AI Engineer
-**S:** MSF paying EUR 150k/year to a third-party SaaS for field translation across active humanitarian missions.
-**T:** Architect and ship a replacement in-house — no team, no template, no precedent.
-**A:** Built FastAPI + Azure AI Foundry agentic pipeline; designed context engineering for medical-domain LLMs; fine-tuned multilingual models; built BLEU evaluation framework and QA dashboard; deployed globally.
-**R:** EUR 150k annual savings; live across multiple active global field missions.
-**Reflection:** Would build the evaluation framework before shipping v1 — production signals revealed gaps that offline BLEU didn't catch. The observability layer should be day-one infrastructure, not a retrofit.
-**Best for questions about:** end-to-end AI delivery, measurable impact, agentic systems, build-vs-buy decisions, production LLM engineering, context engineering
+### [Platform Ownership / Reliability] SharePoint Platform Modernization
+**Source:** cv.md — MSF, AI Software Engineer (Nov 2024 – Jan 2026)
+**S (Situation):** MSF relied on old PowerShell-based processes to crawl SharePoint mission sites, with API throttling, ad-hoc retries, Excel-based error handling and brittle multi-stage processing; the service principal I worked with covered 30 Amsterdam-managed mission sites inside the global tenant.
+**T (Task):** Build a maintainable, queryable platform for operational SharePoint data at multi-million-item scale, and hand it over to the internal consumers who would live with it.
+**A (Action):** Built a direct Microsoft Graph REST integration and used SharePoint REST only where Graph lacked the capability; implemented Graph delta synchronization with state persisted roughly per library; handled pagination, retry/backoff, duplicate and overlapping responses, soft deletion and source-level failure isolation so one bad source could not block a run; retained raw JSON in bronze for debugging; built Delta bronze/silver/gold layers; owned the dbt transformations, tests and dimensional model; deployed through Databricks Asset Bundles with dev/prod separation and CI/CD; trained the downstream IT consumer and handed over query patterns.
+**R (Result):** 3.2m+ items processed across 30 Amsterdam-managed mission sites, full runs completing in under 30 minutes and weekly incremental runs in under 5 minutes, replacing the brittle PowerShell/Excel process with clean, queryable operational data.
+**Reflection:** Performance improvements usually come from choosing a better system boundary or algorithm rather than micro-optimizing compute — I moved off brittle SDK and legacy layers to first-party APIs, tested whether concurrency actually helped instead of assuming it, and stopped short of Spark tuning once it was clear Graph I/O dominated. Reliability is a design decision too: partial failure and restart semantics have to be specified, not discovered.
+**Best for questions about:** most difficult technical problem, architecture decisions, end-to-end ownership, handling ambiguity, reliability and failure handling, performance work, legacy modernization, system design, stakeholder management, trade-offs, delivery and handover
+**Caveats:** Scope is 30 Amsterdam-managed mission sites, NOT the global MSF tenant. Do not reuse the retired "4 days → 30 minutes" claim. Do not claim deep Spark performance specialization. Do not assert exact historical checkpoint semantics beyond delta sync with per-library state.
 
 ---
 
-### [Evaluation / Observability] BLEU Scoring Pipeline and QA Dashboard
-**Source:** Report #049 — Neno — AI Engineer
-**S:** Production LLM models degraded silently — no visibility until users noticed translation quality drops.
-**T:** Build monitoring that catches regressions before they reach users.
-**A:** Designed scheduled BLEU scoring pipeline; built QA dashboard with automated alerts on score drops; integrated into CI/CD.
-**R:** Removed manual review bottleneck; enabled continuous model improvement in production.
-**Reflection:** Automated evals need a human review step for distribution shifts — a score that holds on your test set can still fail on next week's real-world data.
-**Best for questions about:** evaluation frameworks, observability, production ML, quality assurance, preventing silent failures
+### [Reusable Platform Design] Reusable Authentication Modernization
+**Source:** cv.md — MSF, AI Software Engineer
+**S (Situation):** Existing Microsoft-integrated pipelines relied on brittle and partly deprecated authentication paths built on third-party abstraction layers, which made credential changes risky and certificate handling awkward.
+**T (Task):** Provide a maintainable migration path across multiple credential modes and improve certificate handling, without forcing every pipeline to be rewritten at once.
+**A (Action):** Designed an authentication abstraction and credential factory around Azure Identity that hid credential-specific token logic from callers; supported transitional credential methods while warning on deprecated paths; accounted for SharePoint-specific token behaviour; solved certificate formatting and upload problems; added reusable Azure Key Vault certificate tooling to the shared open-source MSF Toolbox; wrote broad tests; and argued the case internally for first-party identity libraries over convenience wrappers.
+**R (Result):** A reusable capability that other pipelines could adopt incrementally, with adoption beginning across the Data & Analytics pipelines before I left.
+**Reflection:** Core platform integrations are better served by a thin, well-designed abstraction over first-party primitives than by a brittle third-party convenience layer — the abstraction earns its place only if it makes the migration path shorter for the next team, which is why I shipped it as shared tooling rather than as project-local code.
+**Best for questions about:** architecture decisions, simplifying complexity, building reusable tooling, technical debt, security and identity integration, migrations, influencing adoption without authority, designing for other engineers
+**Caveats:** Do not claim organisation-wide standardisation — adoption was beginning, not complete. Do not describe this as critical-vulnerability remediation or as eliminating an MFA bypass risk. Exact certificate lifecycle and cryptographic details are not established.
 
 ---
 
-### [Early-Stage Ownership] Dropshirt Zero to EUR 100k ARR
-**Source:** Report #049 — Neno — AI Engineer
-**S:** Two co-founders, zero product, real customers waiting, EUR 0 revenue.
-**T:** Build a full-stack platform, ship it, and grow it into a business as the sole technical founder.
-**A:** Architected Next.js/AWS platform; integrated Mollie, Shopify, WooCommerce; hired and led 6-person team; ran Agile sprints.
-**R:** EUR 100k ARR, 1,900+ DAUs, ~800% CAGR within 12 months.
-**Reflection:** Shipping fast beats shipping right at stage 0 — but technical debt compounds at the pace of revenue. Learned to time refactors to funding milestones, not to discomfort.
-**Best for questions about:** early-stage experience, startup ownership, product delivery, technical leadership, founding engineer fit
+### [Pragmatic Architecture] Translation Backend — Right-Sized System Design
+**Source:** cv.md — MSF, AI Software Engineer
+**S (Situation):** MSF wanted to evaluate internal translation approaches with a small population of evaluators, across several external AI, translation, speech and document services.
+**T (Task):** Build and deploy a usable evaluation application with acceptable latency, including background document and speech workflows, without building infrastructure the use case did not justify.
+**A (Action):** Designed a fully asynchronous FastAPI backend; integrated Azure, OpenAI, Anthropic, Hugging Face, DeepL, speech and document services; implemented background jobs for long-running work; containerized frontend and backend separately; set up Azure DevOps CI/CD, a container registry and Terraform infrastructure; chose lightweight SQLite and Blob persistence appropriate to the expected scale; deliberately skipped rate-limiting and worker complexity that the load did not warrant; and recommended against Streamlit on performance and UX grounds.
+**R (Result):** The application shipped and met its latency expectations; the evaluation app itself saw limited direct adoption, while the document-translation endpoint was later reused more broadly through the organisation-wide chatbot.
+**Reflection:** Architecture should reflect the actual scale and the actual users — unnecessary infrastructure makes a prototype harder to deliver and harder to operate, and the part of this system that survived was the small, well-shaped endpoint rather than the application around it.
+**Best for questions about:** architecture and design decisions, pragmatic trade-offs, avoiding overengineering, delivery under constraints, third-party integration, applied AI in a production system, stakeholder management, a project that did not land the way you expected
+**Caveats:** Do not call it a widely adopted production platform. The exact Azure hosting product is uncertain. The ~€150k figure was addressable third-party licensing spend, NOT realized savings — prefer omitting it. Fine-tuning was Azure-managed, never custom training infrastructure. Do not use the retired "+18 BLEU" figure.
 
 ---
 
-### [Automation / Pipeline] Databricks ETL Re-engineering
-**Source:** Report #049 — Neno — AI Engineer
-**S:** Data team waited 4 days per full ETL cycle — zero real-time operational reporting possible.
-**T:** Re-architect 3 pipeline systems without disrupting active humanitarian operations.
-**A:** Rebuilt with medallion pattern; eliminated unnecessary full refreshes; Terraform IaC; CI/CD-managed Databricks jobs.
-**R:** 4 days -> 30 minutes end-to-end. Near-real-time operational reporting enabled.
-**Reflection:** The speedup wasn't the architecture — it was eliminating unnecessary full refreshes. Always profile before refactoring; assumptions about bottlenecks are almost always wrong.
-**Best for questions about:** automation, pipeline optimization, reducing manual effort, infrastructure as code, reliability
+### [Judgement / Knowing When to Stop] Trading System — Methodological Discipline
+**Source:** cv.md — Selected Engineering Project
+**S (Situation):** I wanted to know whether a classical-ML long/short strategy over S&P 500 constituents could survive honest validation, so I built the research and paper-trading system myself rather than trusting a backtest library's defaults.
+**T (Task):** Build a methodology that avoided the standard historical-testing errors and could run automatically against IBKR, then decide honestly whether the result justified real capital.
+**A (Action):** Purchased point-in-time S&P 500 membership data to remove survivorship bias; implemented walk-forward, non-overlapping temporal folds; added explicit code-level leakage guards; modelled transaction costs and slippage; ranked constituents to build long/short portfolios; built strategy optimization and then reviewed the whole-strategy optimisation critically; containerized the system and automated headless IBKR paper trading.
+**R (Result):** The system paper traded for several months and broadly tracked the backtest over that limited period, and I deliberately stopped before deploying live capital because strategy-level meta-overfitting risk remained material.
+**Reflection:** Good engineering and research judgement includes stopping when the evidence quality does not justify deployment — a sophisticated optimizer does not compensate for an invalid experimental design, and the most valuable thing I built was the validation harness, not the model.
+**Best for questions about:** a difficult technical project, experimental design, data leakage, methodological rigor, trade-offs, failure, judgement, a decision to stop or say no, risk awareness, what you learned from a project that did not ship
+**Caveats:** No demonstrated live alpha. No professional quant expertise, no deep financial econometrics claim, no persistent performance claim.
 
 ---
 
-### [Reliability / Security] Authentication Vulnerability Remediation
-**Source:** Report #049 — Neno — AI Engineer
-**S:** Shared credentials across 3 production pipelines carrying live humanitarian data — MFA bypass risk.
-**T:** Remediate without triggering downtime across active field missions.
-**A:** Replaced shared credentials with Python certificate-based auth module; phased rollout with rollback plan; zero-downtime migration.
-**R:** All 3 systems remediated; zero incidents during migration.
-**Reflection:** Security debt is invisible until it isn't. Document the before-state explicitly so the organisation retains institutional memory of why the control exists.
-**Best for questions about:** production reliability, security engineering, risk management, high-quality standards, working under pressure
+### [Failure / Risk] Talaria Supplier Failure
+**Source:** cv.md — Talaria B.V. / Boeing GoFly (2018–2020)
+**S (Situation):** Talaria used a budget-constrained propeller shaft manufactured by an external supplier for an eVTOL prototype, and under deadline and equipment constraints only one shaft was available.
+**T (Task):** Verify the shaft well enough to integrate it into a flight prototype, with the verification tools and time actually available to a student team.
+**A (Action):** Ran pre-integration checks covering dimensions and spin testing, but did not obtain material certification or perform destructive load testing on a sample; integrated the shaft and proceeded to a tethered test; after the aircraft struck a wall under maximum control input and the shaft failed, ran the post-failure inspection that showed the supplier had effectively manufactured it as two joined pieces, invalidating the continuous-shaft assumption the design rested on.
+**R (Result):** The failure exposed a major supplier-verification weakness in how we sourced and accepted critical hardware, and changed how the team handled critical-component procurement afterwards.
+**Reflection:** For critical hardware you have to name the dominant failure modes explicitly, procure redundant critical parts where practical, destructively test one part against the critical load path, and refuse to let deadline pressure quietly delete a verification step — the checks we ran confirmed geometry, which was never the risk.
+**Best for questions about:** failure and what you learned, risk management, supplier and vendor verification, an engineering decision you would make differently, physical testing, working under deadline pressure, technical leadership, safety-critical judgement
+**Caveats:** Describe accident causality carefully — the impact and the defect both contributed. This was undergraduate student-team engineering; do not imply aerospace certification experience.
 
 ---
 
-### [Adoption / Change Management] PowerShell to CI/CD Automation
-**Source:** Report #005 — One Acre Fund — Tupande AI Engineering Lead
-**S:** Critical data jobs at MSF ran as ad-hoc PowerShell scripts on individual engineers' machines — no version control, no repeatable deployment.
-**T:** Turn tribal scripts into governed infrastructure without stalling the team's delivery.
-**A:** Rewrote the scripts as version-controlled Databricks jobs with Terraform IaC and CI/CD deployment; migrated the team's working habits alongside the code, not after it.
-**R:** Manual deployments eliminated; operational risk removed from active humanitarian data flows.
-**Reflection:** The technical migration took weeks; the behaviour change took months. Adoption is the real deliverable — budget for it explicitly instead of treating it as a rollout afterthought.
-**Best for questions about:** organizational adoption, change management, automation, championing new tooling, influencing without authority, infrastructure as code
+### [Technical Leadership / Physical Systems] Talaria Powertrain Architecture and Subsystem Leadership
+**Source:** cv.md — Talaria B.V. / Boeing GoFly (2018–2020)
+**S (Situation):** An early-stage student eVTOL team had to choose a propulsion architecture under competition rules and hard weight, size and technology-maturity constraints, with no settled answer at the start.
+**T (Task):** Lead the powertrain and subsystem engineering, and coordinate the design work across the people assigned to it.
+**A (Action):** Compared propulsion architectures and evaluated piston versus electric approaches; designed the bevel gearbox and propeller shafts; performed CAD and FEM work and standard mechanical analysis covering bearings, gears, loads, clearance and lubrication; delegated work to two full-time student engineers plus additional part-time contributors; coordinated interfaces with the other engineering leads; and deliberately sought review from more experienced engineering leadership before critical hardware was manufactured and tested.
+**R (Result):** Substantial subsystem design and prototype integration work was completed as the team converged on electric propulsion.
+**Reflection:** Strong subsystem ownership means knowing which decisions are mine to make alone and which ones have physical consequences serious enough to justify pulling in someone more experienced — the judgement is in telling the two apart, not in maximising autonomy.
+**Best for questions about:** technical leadership, architecture and trade-off decisions, physical and multidisciplinary systems, handling ambiguity, delegation, coordinating across teams, knowing when to escalate
+**Caveats:** Powertrain and subsystem engineering only — do NOT attribute controls work. Undergraduate context must stay clear. Do not imply recent professional mechanical-engineering expertise.
 
 ---
 
-### [Governance / Standards] AI and Data Governance Model
-**Source:** Report #005 — One Acre Fund — Tupande AI Engineering Lead
-**S:** MSF's AI and data pipelines ran across globally distributed infrastructure with no coherent access-control or data-governance model.
-**T:** Design RBAC and governance that met enterprise security requirements without blocking field teams who needed the data.
-**A:** Built a custom RBAC model and data-governance framework covering AI and data pipelines; designed it with the teams who would work under it rather than handing it down.
-**R:** Compliance achieved with enterprise security requirements across globally distributed infrastructure.
-**Reflection:** Governance designed *with* the people who live under it gets followed; governance handed down gets routed around. The technical model was the easy half.
-**Best for questions about:** AI governance, establishing standards, RBAC and access control, data governance, compliance, balancing control with usability
+### [Technical Governance / Ownership] Dropshirt Vendor Intervention
+**Source:** cv.md — Dropshirt B.V., Co-Founder & CTO (2021–2023)
+**S (Situation):** Dropshirt outsourced its core ecommerce application to an external engineering team, and over time delivery slowed and maintainability got visibly worse while the business depended on the product.
+**T (Task):** As co-founder and CTO, work out whether that team and that architecture could carry the business, and intervene if not.
+**A (Action):** Learned enough of the Next.js codebase and its context to inspect quality first-hand rather than relying on status reports; identified overengineered microservice boundaries, convoluted infrastructure, weak API extensibility, missing tests, poor migration capability and credentials exposed in the frontend; documented the pattern of recurring maintainability and delivery problems; and replaced the original vendor team through an existing professional contact rather than continuing to escalate inside a relationship that was not improving.
+**R (Result):** The architecture became substantially cleaner, the recurring defects were resolved, and the product reached a stable state before its sale to a Belgian buyer.
+**Reflection:** Outsourcing does not outsource technical accountability — founder-side ownership requires enough implementation understanding to judge maintainability, security and vendor quality yourself, because by the time the symptoms are visible on a roadmap it is already expensive.
+**Best for questions about:** disagreement and escalation, poor technical quality, vendor and stakeholder management, ownership, architecture review, requirements engineering, working through ambiguity, a hard call you had to make
+**Caveats:** The core production application was OUTSOURCED — do not claim personal architecture or implementation of the platform, and do not present this as conventional engineering-team management. Commercial figures (ARR, CAGR, DAUs) are unvalidated and must not be used as established evidence.
 
 ---
 
-### [Forward Deployed / Adoption] Egypt Field QA Tooling
-**Source:** Report #006 — IFS — Forward Deployed AI Engineer
-**S:** Field coordinators in Egypt depended on MSF translation output for operational work but had no way to judge whether it was trustworthy.
-**T:** Give non-engineers a way to evaluate model quality themselves, without ML knowledge and without routing every question through engineering.
-**A:** Built QA tooling that surfaced quality signals in operational terms rather than as BLEU scores; designed it around what coordinators actually needed to decide, not around what the model emitted.
-**R:** Coordinators independently evaluated translation quality; the review bottleneck came off the engineering team.
-**Reflection:** The hardest part was never the models. It was helping field teams understand where the system was reliable — and that is a product problem, not a modelling one.
-**Best for questions about:** forward-deployed work, customer-facing engineering, non-technical users, human-in-the-loop, driving adoption, translating technical output into business terms
+## Conditional story — do not lead with it
 
----
-
-### [Enablement / Handoff] MSF Python Enablement and AI Guidelines
-**Source:** Report #006 — IFS — Forward Deployed AI Engineer
-**S:** Semi-technical MSF staff depended on engineering for analysis work they were capable of doing themselves, and the organisation had no shared position on how AI should be used.
-**T:** Transfer capability instead of accumulating dependency, and help set the guardrails.
-**A:** Ran Python training sessions for semi-technical staff; contributed to shaping organisational AI usage guidelines.
-**R:** Staff self-served on work that previously queued behind engineering; the guidelines gave the org a consistent position on AI use.
-**Reflection:** Handoff is a design decision, not a final phase. If you build it so only you can run it, you have not finished.
-**Best for questions about:** enablement, mentorship, knowledge transfer, customer handoff, AI governance and policy, influencing without authority
-
----
-
-### [Integration / Delivery Speed] Dropshirt Enterprise Integration Layer
-**Source:** Report #006 — IFS — Forward Deployed AI Engineer
-**S:** Merchants needed to connect existing commerce stacks to the Dropshirt platform, and onboarding was the growth bottleneck.
-**T:** Make third-party integration fast and repeatable rather than bespoke per merchant.
-**A:** Integrated Mollie, Shopify, and WooCommerce; built a common abstraction over inconsistent third-party APIs so each new merchant was configuration rather than code.
-**R:** Merchant onboarding time cut to under 24 hours.
-**Reflection:** Every vendor's sandbox lies. Budget integration time for the gap between the documentation and production behaviour, not for the happy path.
-**Best for questions about:** enterprise API integration, middleware, delivery speed, reducing onboarding friction, working around third-party constraints
-
----
-
-### [Orchestration / Guardrails] Trading Platform Multi-Stage Orchestration
-**Source:** Report #006 — IFS — Forward Deployed AI Engineer
-**S:** An automated equity trading pipeline needed to make decisions that no single model should be trusted to make unsupervised.
-**T:** Orchestrate signal generation, risk validation, and code-quality enforcement with guardrails that actually held.
-**A:** Designed explicit hand-offs between stages with evaluation checkpoints at each boundary; enforced code quality automatically through SonarQube and Radon; added scheduled retraining and performance monitoring.
-**R:** A live pipeline safe enough to leave running unattended.
-**Reflection:** Guardrails are cheaper than recovery. The checkpoints that felt like overhead in week one are exactly what made it safe to walk away from.
-**Best for questions about:** multi-agent orchestration, human-in-the-loop design, guardrails and safety, automated evaluation checkpoints, production ML reliability
-
----
-
-### [Stakeholder Influence] Talaria: Engineer to Business Lead
-**Source:** Report #005 — One Acre Fund — Tupande AI Engineering Lead
-**S:** The Boeing GoFly eVTOL program had a credible technical concept but needed funding and external partners to keep going.
-**T:** Move from leading the powertrain build to owning partnerships and roadmap as the programme scaled.
-**A:** Led 10+ engineers across powertrain and controls to deliver sub-systems in 12 months, then pivoted to driving cross-team coordination and external stakeholder alignment.
-**R:** Competitive eVTOL prototype delivered; €50k in sponsorship funding secured.
-**Reflection:** Technical credibility is what makes stakeholder influence stick. The pivot only worked because I had built the thing first — the partners were buying a demonstrated system, not a pitch.
-**Best for questions about:** stakeholder influence, business acumen, IC-to-leadership transitions, cross-functional coordination, securing buy-in and funding, technical leadership at scale
+**Drone-navigation refactoring and deployment.** Useful only when a role specifically asks about inheriting someone else's code, Jetson/Linux deployment, or walking away from technical debt. The supported evidence is Python refactoring, version-control and abstraction cleanup, Jetson deployment, and the judgement that the system needed a fundamental redesign rather than another patch. The navigation algorithms were **inherited** and live quantitative performance was never established — this is not a robotics, computer-vision or SLAM story, and must never be used as primary evidence of algorithm expertise.
