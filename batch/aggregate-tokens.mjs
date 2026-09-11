@@ -4,9 +4,8 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { estimateCost } from '../utils/token-tracker.mjs';
-import { isMainModule } from '../lib/is-main-module.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -241,6 +240,6 @@ function main() {
   console.log(`  ${padTotal}${formatK(grandTotalTokens)} tokens ($${grandCost.toFixed(4)})\n`);
 }
 
-if (isMainModule(import.meta.url)) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main();
 }

@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<!-- career-ops-template
+     name: Motivation Letter
+     kind: cover
+     notes: Minimal motivation-letter variant. No visible role-title heading and
+            no company/city/date line. Header is name plus a reduced contact
+            line only. ROLE_TITLE is kept in the document title for PDF
+            metadata and ATS text extraction, not rendered in the body.
+            LANGUAGE_CLOSING and FOOTNOTES are both restyled as normal body
+            prose so they can carry a fifth and sixth body paragraph instead of
+            an italic language sign-off and a small-print footnote block.
+-->
+<title>{{ROLE_TITLE}} — {{NAME}}</title>
+<style>
+  :root {
+    --accent-color: #1A56A0;
+    --font-family: "Helvetica", Arial, sans-serif;
+    --font-size: 10pt;
+    --page-margin: 0.6in;
+  }
+  @page { margin: var(--page-margin); }
+
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-variant-ligatures: none;
+    font-feature-settings: "liga" 0, "clig" 0, "dlig" 0;
+  }
+
+  html {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body {
+    font-family: var(--font-family);
+    font-size: var(--font-size);
+    line-height: 1.45;
+    color: #1a1a1a;
+    background: #ffffff;
+    font-variant-ligatures: none;
+    font-feature-settings: "liga" 0, "clig" 0, "dlig" 0;
+  }
+
+  .name {
+    font-weight: 700;
+    font-size: 14pt;
+    margin-bottom: 3pt;
+  }
+
+  .contact {
+    font-size: 9pt;
+    color: #666666;
+    line-height: 1.3;
+  }
+
+  .contact a { color: var(--accent-color); text-decoration: none; }
+
+  .divider {
+    border: none;
+    border-top: 0.5pt solid #cccccc;
+    margin: 8pt 0 12pt;
+  }
+
+  .greeting { margin-bottom: 9pt; }
+
+  p { margin-bottom: 9pt; }
+
+  /* Carries a normal body paragraph in this variant, so the base template's
+     italic language-sign-off styling is deliberately reset. */
+  .language-closing {
+    font-style: normal;
+    margin-top: 0;
+    margin-bottom: 9pt;
+  }
+
+  /* Carries a normal body paragraph in this variant, so the base template's
+     small-print footnote styling (border, 8pt, grey) is deliberately reset. */
+  .footnotes {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+  }
+
+  .footnotes p {
+    font-size: var(--font-size);
+    color: #1a1a1a;
+    line-height: 1.45;
+    margin-bottom: 9pt;
+  }
+
+  .signature { margin-top: 12pt; }
+</style>
+</head>
+<body>
+  <div class="name">{{NAME}}</div>
+  <div class="contact">{{CONTACT_LINE}}</div>
+  <hr class="divider">
+
+  {{GREETING_BLOCK}}
+  <p>{{OPENING}}</p>
+  <p>{{PROFILE_INTRO}}</p>
+  {{PROBLEMS_BLOCK}}
+  {{CLOSING_BLOCK}}
+  {{LANGUAGE_CLOSING_BLOCK}}
+  {{FOOTNOTES_BLOCK}}
+  {{SIGNATURE_BLOCK}}
+</body>
+</html>

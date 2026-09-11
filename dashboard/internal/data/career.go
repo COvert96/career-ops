@@ -49,45 +49,18 @@ func resolveReportPath(careerOpsPath, trackerPath, link string) string {
 	return link
 }
 
-func getRepoRoot() string {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "."
-	}
-	current := cwd
-	for {
-		if _, err := os.Stat(filepath.Join(current, "path-resolver.mjs")); err == nil {
-			return current
-		}
-		parent := filepath.Dir(current)
-		if parent == current {
-			break
-		}
-		current = parent
-	}
-	return cwd
-}
-
-func resolveTrackerPath(careerOpsPath string) string {
-	if envTracker := strings.TrimSpace(os.Getenv("CAREER_OPS_TRACKER")); envTracker != "" {
-		if filepath.IsAbs(envTracker) {
-			return filepath.Clean(envTracker)
-		}
-		return filepath.Clean(filepath.Join(getRepoRoot(), envTracker))
-	}
-	dataPath := filepath.Clean(filepath.Join(careerOpsPath, "data", "applications.md"))
-	if _, err := os.Stat(dataPath); err == nil {
-		return dataPath
-	}
-	return filepath.Clean(filepath.Join(careerOpsPath, "applications.md"))
-}
-
 // ParseApplications reads applications.md and returns parsed applications.
+// It tries both {path}/applications.md and {path}/data/applications.md for compatibility.
 func ParseApplications(careerOpsPath string) []model.CareerApplication {
-	filePath := resolveTrackerPath(careerOpsPath)
+	filePath := filepath.Join(careerOpsPath, "applications.md")
 	content, err := os.ReadFile(filePath)
 	if err != nil {
-		return nil
+		// Fallback: try data/ subdirectory
+		filePath = filepath.Join(careerOpsPath, "data", "applications.md")
+		content, err = os.ReadFile(filePath)
+		if err != nil {
+			return nil
+		}
 	}
 
 	lines := strings.Split(string(content), "\n")
@@ -131,7 +104,6 @@ func ParseApplications(careerOpsPath string) []model.CareerApplication {
 			Date:    at("date"),
 			Company: at("company"),
 			Role:    at("role"),
-			JobURL:  at("url"),
 			Status:  at("status"),
 			HasPDF:  strings.Contains(at("pdf"), "\u2705"),
 		}
@@ -162,9 +134,7 @@ func ParseApplications(careerOpsPath string) []model.CareerApplication {
 		apps = append(apps, app)
 	}
 
-	// Enrich with job URLs using the tracker URL as tier zero, followed by the
-	// legacy 5-tier strategy for trackers that predate the URL column:
-	// 0. URL column in the tracker
+	// Enrich with job URLs using 5-tier strategy:
 	// 1. **URL:** field in report header (newest reports)
 	// 2. **Batch ID:** in report -> batch-input.tsv URL lookup
 	// 3. report_num -> batch-state completed mapping (legacy)
@@ -174,9 +144,6 @@ func ParseApplications(careerOpsPath string) []model.CareerApplication {
 	reportNumURLs := loadJobURLs(careerOpsPath)
 
 	for i := range apps {
-		if apps[i].JobURL != "" {
-			continue
-		}
 		if apps[i].ReportPath == "" {
 			continue
 		}
@@ -635,7 +602,7 @@ var trackerHeaderAliases = map[string]string{
 	"company": "company", "empresa": "company",
 	"via": "via", "role": "role", "puesto": "role",
 	"location": "location", "score": "score", "status": "status",
-	"pdf": "pdf", "report": "report", "notes": "notes", "url": "url",
+	"pdf": "pdf", "report": "report", "notes": "notes",
 }
 
 // legacyTrackerColumns is the original fixed layout in splitTrackerRow field
@@ -689,6 +656,7 @@ func resolveTrackerColumns(lines []string) map[string]int {
 	return legacyTrackerColumns
 }
 
+// UpdateApplicationStatus updates the status of an application in applications.md.
 func UpdateApplicationStatus(careerOpsPath string, app model.CareerApplication, newStatus string) error {
 	return UpdateApplicationStatusAndNotes(careerOpsPath, app, newStatus, "")
 }

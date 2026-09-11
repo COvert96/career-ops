@@ -17,7 +17,7 @@ import { readFile, writeFile, stat, copyFile, rm } from 'fs/promises';
 import { resolve, basename, dirname, join } from 'path';
 import { execFileSync } from 'child_process';
 import { existsSync, mkdirSync } from 'fs';
-import { isMainModule } from './lib/is-main-module.mjs';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 const MIN_SECTIONS = 4;
 
@@ -27,44 +27,14 @@ const REQUIRED_COMMANDS = [
   '\\\\resumeProjectHeading',
 ];
 
-// Proper Unicode script test (not a hand-picked codepoint range) so
-// supplementary-plane ideographs (CJK Unified Ideographs Extension B and
-// later, e.g. U+20000+) are covered, not just the BMP. Needs the `u` flag --
-// without it, \p{Script=...} throws, and a bare codepoint-range class only
-// ever sees UTF-16 surrogate halves for anything above U+FFFF, never the
-// real character.
-const CJK_RE = /\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul}/u;
-
-// xeCJK (Latin-doc CJK) or ctex (Chinese-doc-class CJK) means the .tex
-// already loads a CJK-capable font setup (see templates/cv-template.cjk.tex).
-// Matches xeCJK/ctex anywhere in a \usepackage package list (not just as the
-// sole argument, e.g. `\usepackage{fontspec,xeCJK}`), and ctex's own document
-// classes (`\documentclass{ctexart}` and friends), which auto-configure
-// xeCJK/LuaTeX-ja/CJK depending on engine without a separate \usepackage.
-const CJK_PACKAGE_RE = /\\usepackage(?:\[[^\]]*\])?\{[^}]*\b(?:xeCJK|ctex)\b[^}]*\}|\\documentclass(?:\[[^\]]*\])?\{ctex(?:art|rep|book)?\}/;
-
-/**
- * Resolve the LaTeX engine available on PATH, preferring tectonic (XeTeX
- * backend, supports CJK via fontspec/xeCJK) over pdflatex (no CJK support).
- * @returns {string|null}
- */
-export function resolveLatexEngine() {
-  for (const candidate of ['tectonic', 'pdflatex']) {
-    try {
-      execFileSync(candidate, ['--version'], { stdio: 'pipe' });
-      return candidate;
-    } catch { /* not found */ }
-  }
-  return null;
-}
+const CJK_RE = /[぀-ヿ㐀-鿿豈-﫿ｦ-ﾟ가-힯ᄀ-ᇿ]/;
 
 /**
  * @param {string} content
  * @param {boolean} compileOnly
- * @param {string|null} [engine] - resolved LaTeX engine ('tectonic'/'pdflatex'/null); affects CJK handling
  * @returns {{ issues: string[], counts: object }}
  */
-export function validateLatexContent(content, compileOnly, engine = null) {
+export function validateLatexContent(content, compileOnly) {
   const issues = [];
   let resumeItemCount = 0;
   let subheadingCount = 0;
@@ -90,15 +60,7 @@ export function validateLatexContent(content, compileOnly, engine = null) {
   }
 
   if (CJK_RE.test(content)) {
-    const hasCjkPackage = CJK_PACKAGE_RE.test(content);
-    if (engine === 'tectonic' && hasCjkPackage) {
-      // tectonic's backend is XeTeX, so fontspec/xeCJK (loaded by
-      // templates/cv-template.cjk.tex) can render CJK glyphs — no issue.
-    } else if (engine === 'tectonic') {
-      issues.push('CJK characters detected but no CJK package (xeCJK/ctex) is loaded. Generate from the CJK-aware template instead: `node build-cv-latex.mjs <input.json> <output.tex> --template=cjk` (templates/cv-template.cjk.tex), or use `pdf` mode (HTML to PDF, which renders CJK) for these CVs.');
-    } else {
-      issues.push('CJK characters detected. This CJK-aware LaTeX path needs a XeTeX-based engine (fontspec/xeCJK) — pdfLaTeX cannot compile it. Install tectonic (brew install tectonic) and regenerate from the CJK-aware template (`--template=cjk`), or use `pdf` mode (HTML to PDF, which renders CJK) for these CVs.');
-    }
+    issues.push('CJK characters detected. The LaTeX template does not support Japanese/Chinese/Korean yet (pdfLaTeX setup with no CJK font). Use `pdf` mode (HTML to PDF, which renders CJK) for these CVs.');
   }
 
   for (const cmd of REQUIRED_COMMANDS) {
@@ -141,8 +103,7 @@ export function validateLatexContent(content, compileOnly, engine = null) {
  * @returns {Promise<object>}
  */
 export async function compileLatexFile(absPath, content, outputPath, compileOnly) {
-  const engine = resolveLatexEngine();
-  const { issues, counts } = validateLatexContent(content, compileOnly, engine);
+  const { issues, counts } = validateLatexContent(content, compileOnly);
   const fileInfo = await stat(absPath);
   const sizeKB = (fileInfo.size / 1024).toFixed(1);
 
@@ -168,6 +129,15 @@ export async function compileLatexFile(absPath, content, outputPath, compileOnly
   const targetDir = dirname(targetPdf);
   if (!existsSync(targetDir)) {
     mkdirSync(targetDir, { recursive: true });
+  }
+
+  let engine = null;
+  for (const candidate of ['tectonic', 'pdflatex']) {
+    try {
+      execFileSync(candidate, ['--version'], { stdio: 'pipe' });
+      engine = candidate;
+      break;
+    } catch { /* not found */ }
   }
 
   if (!engine) {
@@ -279,6 +249,6 @@ async function main() {
   process.exit(report.compiled ? 0 : (report.valid ? 1 : 1));
 }
 
-if (isMainModule(import.meta.url)) {
+if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   main();
 }

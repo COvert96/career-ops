@@ -16,9 +16,8 @@ Node.js (`tests/helpers.mjs`).
   `fail`, `warn`, plus `ROOT` (repo root), `QUICK` (`--quick` flag), and
   `NODE` (current Node binary).
 - `providers/{name}.test.mjs` — one file per scanner provider (see
-  [providers/ADDING_A_PROVIDER.md](../providers/ADDING_A_PROVIDER.md) for the
-  test pattern), plus shared cross-provider tests such as
-  `ats-ssrf-hardening.test.mjs`.
+  [providers/README.md](../providers/README.md) for the test pattern), plus
+  shared cross-provider tests such as `ats-ssrf-hardening.test.mjs`.
   Underscore-prefixed files (e.g. `_html-entities.test.mjs`) test shared
   helper modules.
 - Other `*.test.mjs` files at this level (e.g. `stats.test.mjs`) cover root

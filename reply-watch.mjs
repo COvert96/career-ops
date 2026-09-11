@@ -21,7 +21,6 @@ import {
   openTrackerTransaction, rebuildRow, resolveTrackerPath,
 } from './tracker-utils.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
-import { localToday } from './lib/local-today.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_CANDIDATES_PATH = path.join(__dirname, 'data', 'reply-candidates.json');
@@ -169,7 +168,7 @@ function groupStatusRecommendations(recommendations) {
   return { updates, conflicts };
 }
 
-async function updateTrackerStatuses(updates, onApplied = null) {
+async function updateTrackerStatuses(updates) {
   const trackerTransaction = await openTrackerTransaction(APPS_FILE);
 
   try {
@@ -203,10 +202,7 @@ async function updateTrackerStatuses(updates, onApplied = null) {
       applied.add(update.num);
     }
 
-    if (applied.size > 0) {
-      trackerTransaction.replace(lines.join('\n'));
-      if (onApplied) onApplied(applied, updatesByNum);
-    }
+    if (applied.size > 0) trackerTransaction.replace(lines.join('\n'));
     return { applied, alreadyCurrent, conflicts, missing, recommendationConflicts: grouped.conflicts };
   } finally {
     trackerTransaction.close();
@@ -312,22 +308,7 @@ async function main() {
 
     const answer = await askQuestion(`Apply recommended status updates to ${APPS_FILE}? (y/N): `);
     if (answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes') {
-      const statusLogFile = path.join(path.dirname(APPS_FILE), 'status-log.tsv');
-      const todayStr = localToday();
-
-      const result = await updateTrackerStatuses(updates, (applied, updatesByNum) => {
-        for (const num of applied) {
-          const u = updatesByNum.get(num);
-          if (u) {
-            const line = `${num}\t${todayStr}\t${u.oldStatus}\t${u.newStatus}\treply-watch\t\n`;
-            try {
-              fs.appendFileSync(statusLogFile, line, 'utf-8');
-            } catch (err) {
-              console.warn(`Warning: failed to append to status-log.tsv for #${num}: ${err.message}`);
-            }
-          }
-        }
-      });
+      const result = await updateTrackerStatuses(updates);
       for (const r of updates) {
         const count = r.count > 1 ? ` (${r.count} replies)` : '';
         if (result.applied.has(r.num)) {

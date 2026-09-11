@@ -16,11 +16,8 @@
 import { readFileSync, existsSync, realpathSync, writeFileSync, symlinkSync, rmSync } from 'fs';
 import { join, dirname, relative, sep } from 'path';
 import { fileURLToPath } from 'url';
-import { isMainModule } from './lib/is-main-module.mjs';
 import { load as yamlLoad } from 'js-yaml';
 import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
-import { getCareerOpsRoot } from './path-resolver.mjs';
-import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
 const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
@@ -58,13 +55,9 @@ const MACHINE_SUMMARY_FIELDS = new Set([
   // Reporting line stated by the JD, verbatim (report + Machine Summary only).
   // Allowlisted so it round-trips; no consumer logic yet.
   'reports_to',
-  // Block B's requirement -> importance table, mirrored row by row (evidence
-  // tier, importance band, match). Allowlisted so it round-trips; no consumer
-  // logic yet, deliberately: importance is score-neutral, so nothing that folds
-  // historical scores may start reading it without its own design pass.
-  'requirement_importance',
 ]);
 
+// --- CLI args ---
 const args = process.argv.slice(2);
 
 const KNOWN_FLAGS = ['--min-threshold', '--min-vendor-n', '--self-test', '--summary', '--help', '-h'];
@@ -95,6 +88,17 @@ const MIN_VENDOR_N = (() => {
   return Number.isNaN(value) || value < 1 ? 8 : value;
 })();
 
+// Minimum per-vendor sample before a channel-yield recommendation fires. Kept
+// modest (small trackers) but high enough that one unlucky bucket isn't a claim.
+const minVendorNIdx = args.indexOf('--min-vendor-n');
+const MIN_VENDOR_N = (() => {
+  if (minVendorNIdx === -1 || args[minVendorNIdx + 1] === undefined) return 8;
+  const n = parseInt(args[minVendorNIdx + 1], 10);
+  // Reject 0/negative: a floor of 0 makes sufficientSample always true and
+  // silently defeats the "don't claim on noise" guard the whole feature rests on.
+  return Number.isNaN(n) || n < 1 ? 8 : n;
+})();
+
 // --- Status normalization (mirrors verify-pipeline.mjs) ---
 const ALIASES = {
   'evaluada': 'evaluated', 'condicional': 'evaluated', 'hold': 'evaluated',
@@ -121,15 +125,9 @@ export function classifyOutcome(status) {
   const s = normalizeStatus(status);
   // 'hired' is the strongest positive outcome — a landed job. It must not fall
   // through to the 'pending' default, which would drag conversion rates down.
-  if (['hired', 'interview', 'offer', 'responded'].includes(s)) return 'positive';
-  // 'applied' is SENT, not answered: denominator only, never the numerator.
-  // Mirrors ADVANCED_STATUSES, which already excludes it.
-  if (s === 'applied') return 'awaiting';
-  if (s === 'rejected') return 'negative';
-  // Withdrawn by the candidate or the posting died: neither a submission the
-  // canonical funnel counts (stats.mjs) nor an employer decision.
-  if (s === 'discarded') return 'discarded';
-  if (s === 'skip') return 'self_filtered';
+  if (['hired', 'interview', 'offer', 'responded', 'applied'].includes(s)) return 'positive';
+  if (['rejected', 'discarded'].includes(s)) return 'negative';
+  if (['skip'].includes(s)) return 'self_filtered';
   return 'pending'; // evaluated
 }
 
@@ -145,7 +143,7 @@ export function classifyOutcome(status) {
 // the base only dilutes the share. Must stay in lockstep with the filter that
 // guards the discard-reason harvest loop.
 function discardableBase(enriched) {
-  return enriched.filter(e => REASON_BEARING.has(e.outcome)).length;
+  return enriched.filter(e => e.outcome === 'self_filtered' || e.outcome === 'negative').length;
 }
 
 // Entries that actually carry gaps, i.e. the ones a blocker can be extracted
@@ -155,123 +153,11 @@ function gapBearingBase(enriched) {
   return enriched.filter(e => e.report?.gaps?.length > 0).length;
 }
 
-// Outcome buckets a breakdown row carries. Kept in one place so a new bucket
-// cannot be added to classifyOutcome without every counter learning about it —
-// `entry[outcome]++` on a missing key silently writes NaN.
-export const OUTCOME_BUCKETS = ['positive', 'awaiting', 'negative', 'discarded', 'self_filtered', 'pending'];
-// Buckets whose rows can carry a skip/discard reason or a blocker: the base for
-// discard-reason shares and the source of blocker / tech-gap harvesting.
-const REASON_BEARING = new Set(['negative', 'discarded', 'self_filtered']);
-
-// Sample floors for the prescriptive recommendations. Small on purpose: they
-// do not claim statistical confidence, they stop a single row from becoming
-// an instruction ("avoid X", "set the threshold at Y").
-// A prescription ("double down", "avoid") needs at least this many DECIDED
-// outcomes — employer silence is not evidence in either direction.
-const MIN_DECIDED_FOR_RECOMMENDATION = 2;
-const MIN_POSITIVE_SCORES_FOR_THRESHOLD = 3;
-
-/** A zeroed counter row for the per-segment breakdowns. */
-export function newOutcomeCounts() {
-  const row = { total: 0 };
-  for (const bucket of OUTCOME_BUCKETS) row[bucket] = 0;
-  return row;
-}
-
-/**
- * Rates for one breakdown row. `conversionRate` divides by SUBMITTED, never by
- * `total` (which also counts Evaluated rows never sent). `decidedRate` divides
- * by the rows with a recorded outcome and is `null`, not 0, while nothing is
- * decided. `decided` ships as a count so callers gate on facts, not on a
- * rounded percentage.
- */
-export function withOutcomeRates(data) {
-  const submitted = data.positive + data.negative + data.awaiting;
-  const decided = data.positive + data.negative;
-  return {
-    ...data,
-    submitted,
-    decided,
-    conversionRate: submitted > 0 ? Math.round((data.positive / submitted) * 100) : 0,
-    decidedRate: decided > 0 ? Math.round((data.positive / decided) * 100) : null,
-  };
-}
-
-/** Group entries by a key, count outcomes, attach rates. Largest bucket first. */
-function breakdownBy(enriched, labelKey, keyOf) {
-  const map = new Map();
-  for (const e of enriched) {
-    const k = keyOf(e);
-    if (!map.has(k)) map.set(k, newOutcomeCounts());
-    const row = map.get(k);
-    row.total++;
-    row[e.outcome]++;
-  }
-  return [...map.entries()]
-    .map(([label, data]) => ({ [labelKey]: label, ...withOutcomeRates(data) }))
-    .sort((a, b) => b.total - a.total);
-}
-
-/**
- * The segment worth doubling down on: highest decidedRate among rows with
- * enough DECIDED outcomes. Ranking by conversionRate would let "1 positive +
- * 1 awaiting" (50%) outrank "5 positive + 15 awaiting" (25%). A rate that
- * rounds to 0% (1 of 201) is not a lane to double down on.
- */
-export function bestDecidedSegment(rows) {
-  return rows
-    .filter(r => r.decided >= MIN_DECIDED_FOR_RECOMMENDATION && r.decidedRate > 0)
-    .sort((a, b) => b.decidedRate - a.decidedRate || b.decided - a.decided)[0] || null;
-}
-
-/**
- * The segment to avoid: nothing advanced across enough DECIDED outcomes, the
- * most evidence first. Gate on counts, not the rounded rate: 1 positive of 201
- * decided rounds to 0% and is not "none advanced"; 1 negative + 1 awaiting is
- * a data point, not a pattern.
- */
-export function worstDecidedSegment(rows) {
-  return rows
-    .filter(r => r.positive === 0 && r.decided >= MIN_DECIDED_FOR_RECOMMENDATION)
-    .sort((a, b) => b.decided - a.decided)[0] || null;
-}
-
-/**
- * Score floor from decided outcomes. The lowest positive score is always
- * reported as an observation; it becomes a recommended threshold only when
- * enough positives carry a score AND at least one rejected application scored
- * below it — "nothing below X advanced" is vacuous when nothing below X was
- * ever decided.
- */
-export function scoreThresholdFrom(positiveScoresRaw, negativeScoresRaw) {
-  const positive = positiveScoresRaw.filter(s => s > 0);
-  const negative = negativeScoresRaw.filter(s => s > 0);
-  const min = positive.length > 0 ? Math.min(...positive) : 0;
-  const rejectedBelow = negative.filter(s => s < min).length;
-  const sufficient = positive.length >= MIN_POSITIVE_SCORES_FOR_THRESHOLD;
-  const prescribe = sufficient && rejectedBelow > 0;
-  let reasoning;
-  if (positive.length === 0) reasoning = 'No positive outcome carries a score yet.';
-  else if (!sufficient) reasoning = `Lowest score among positive outcomes so far is ${min}, but only ${positive.length} positive outcome(s) carry a score (${MIN_POSITIVE_SCORES_FOR_THRESHOLD} needed before this is a threshold).`;
-  else if (!prescribe) reasoning = `Lowest score among ${positive.length} positive outcomes is ${min}, but no rejected application scored below it — nothing shows that lower scores fail.`;
-  else reasoning = `None of the ${positive.length} positive outcomes scored below ${min}, and ${rejectedBelow} rejected application(s) did.`;
-  return {
-    recommended: prescribe ? Math.floor(min * 10) / 10 : null,
-    observedMinimum: min > 0 ? min : null,
-    sampleSize: positive.length,
-    sufficientSample: sufficient,
-    rejectedBelow,
-    reasoning,
-    positiveRange: positive.length > 0 ? `${min} - ${Math.max(...positive)}` : 'N/A',
-  };
-}
-
-// Statuses that count as a submitted application for channel-yield analysis.
-// 'evaluated' was never sent, 'skip' is self-filtered, and 'discarded' (withdrawn
-// or the posting closed) proves neither a submission nor an answer — the same
-// set stats.mjs uses for its canonical funnel. Module-scoped so the self-test
+// Statuses that count as a submitted application for channel-yield analysis
+// (drop 'evaluated' = never applied, 'skip' = self-filtered). 'hired' counts —
+// a landed job was, by definition, submitted. Module-scoped so the self-test
 // can assert membership and the channel-yield pass and self-test share one set.
-const SUBMITTED_STATUSES = new Set(['applied', 'responded', 'interview', 'offer', 'hired', 'rejected']);
+const SUBMITTED_STATUSES = new Set(['applied', 'responded', 'interview', 'offer', 'hired', 'rejected', 'discarded']);
 
 // Statuses that count as "advanced past screening" — STRICTER than
 // outcome=='positive': a bare 'applied' (submitted, no reply yet) does NOT
@@ -400,16 +286,6 @@ function extractTechMentions(description) {
   return matches.map(m => TECH_CANONICAL.get(m.toLowerCase()) || m);
 }
 
-/**
- * Run the in-process self-test for this script's pure helpers.
- *
- * Covers the Machine Summary parser (including the MACHINE_SUMMARY_FIELDS
- * allowlist and the nested `risk_summary` / `requirement_importance` shapes),
- * ATS vendor detection, and the Via channel analysis. Exits non-zero on the
- * first batch of failures so CI and `--self-test` fail loudly.
- *
- * @returns {void}
- */
 function runSelfTest() {
   const summary = parseMachineSummary(`
 ## Machine Summary
@@ -477,54 +353,6 @@ risk_summary:
     if (riskSummary.ai_infra !== 'not_evaluated') failures.push('risk_summary.ai_infra was not preserved');
   }
 
-  // requirement_importance preservation: Block B's table is a LIST OF MAPS,
-  // a shape no allowlisted key had before it. The allowlist filters top-level
-  // keys only, so the list must survive with every row's nested fields intact
-  // — including jd_signal: null, which is legal for the structural/inferred
-  // evidence tiers and must not be dropped or coerced.
-  const reqImportance = parseMachineSummary(`
-## Machine Summary
-
-\`\`\`yaml
-company: "Acme"
-role: "Staff AI Engineer"
-score: 4.4
-requirement_importance:
-  - requirement: "Fluent German (C1)"
-    jd_signal: "Verhandlungssicheres Deutsch ist Voraussetzung"
-    evidence: "stated"
-    importance: "critical"
-    match: "missing"
-  - requirement: "Kubernetes in production"
-    jd_signal: null
-    evidence: "inferred"
-    importance: "meaningful"
-    match: "partial"
-\`\`\`
-`)?.requirement_importance;
-  if (!Array.isArray(reqImportance) || reqImportance.length !== 2) {
-    failures.push('requirement_importance list was dropped or not parsed as a list');
-  } else {
-    const [stated, inferred] = reqImportance;
-    if (stated.requirement !== 'Fluent German (C1)') failures.push('requirement_importance[0].requirement was not preserved');
-    if (stated.jd_signal !== 'Verhandlungssicheres Deutsch ist Voraussetzung') failures.push('requirement_importance[0].jd_signal verbatim quote was not preserved');
-    if (stated.evidence !== 'stated') failures.push('requirement_importance[0].evidence was not preserved');
-    if (stated.importance !== 'critical') failures.push('requirement_importance[0].importance was not preserved');
-    if (stated.match !== 'missing') failures.push('requirement_importance[0].match was not preserved');
-    if (inferred.jd_signal !== null) failures.push('requirement_importance[1].jd_signal null was not preserved');
-    if (inferred.evidence !== 'inferred') failures.push('requirement_importance[1].evidence was not preserved');
-    // The Block B gate, asserted on parsed data: an inferred row may never
-    // reach the two bands that create the interview-risk + mitigation
-    // obligation. Enforced in the modes; checked here so a fixture that
-    // violates it can never be introduced as "expected" output.
-    if (inferred.importance === 'critical' || inferred.importance === 'high') {
-      failures.push('requirement_importance fixture violates the inferred cap (evidence: inferred must never be critical/high)');
-    }
-  }
-
-  // Backward compat: summaries without requirement_importance parse as before.
-  if ('requirement_importance' in (summary ?? {})) failures.push('summary without requirement_importance must not gain the key');
-
   // Vendor detection (community ATS only; white-labeled → null)
   const vendorCases = [
     ['https://boards.greenhouse.io/acme/jobs/12345', 'greenhouse'],
@@ -542,70 +370,6 @@ requirement_importance:
     const got = detectVendor(url);
     if (got !== expected) failures.push(`detectVendor(${JSON.stringify(url)}) → ${JSON.stringify(got)}, expected ${JSON.stringify(expected)}`);
   }
-
-  // Report header fields survive the locale they were written in. French output
-  // puts a space before the colon and accents "Archétype"; both used to make the
-  // field parse as absent, silently. parseReport strips `**` first, so the cases
-  // below are given in that post-strip form. Call the pattern rather than the
-  // string: `subject.match(re)` makes CodeQL read these URL fixtures as patterns
-  // (js/incomplete-hostname-regexp) because of their unescaped host dots.
-  const headerCases = [
-    ['URL: https://job-boards.greenhouse.io/acme/jobs/1', REPORT_URL_RE, 'https://job-boards.greenhouse.io/acme/jobs/1'],
-    ['URL : https://job-boards.greenhouse.io/acme/jobs/1', REPORT_URL_RE, 'https://job-boards.greenhouse.io/acme/jobs/1'],
-    ['URL\u00a0: https://jobs.lever.co/acme/x', REPORT_URL_RE, 'https://jobs.lever.co/acme/x'],
-    ['Archetype: Delivery Manager', REPORT_ARCHETYPE_RE, 'Delivery Manager'],
-    ['Archétype : Delivery Manager', REPORT_ARCHETYPE_RE, 'Delivery Manager'],
-    ['Arquetipo: Delivery Manager', REPORT_ARCHETYPE_RE, 'Delivery Manager'],
-  ];
-  for (const [line, re, expected] of headerCases) {
-    const got = re.exec(line)?.[1] ?? null;
-    if (got !== expected) failures.push(`report header ${JSON.stringify(line)} → ${JSON.stringify(got)}, expected ${JSON.stringify(expected)}`);
-  }
-
-  // A header that is genuinely absent must still yield null, so the fix cannot
-  // turn "no field" into a false positive.
-  if (REPORT_URL_RE.test('Score: 4.4/5')) failures.push('REPORT_URL_RE matched a line with no URL field');
-
-  // A header field is single-line. A label split from its colon, or a value pushed to
-  // the next line, must not parse — otherwise the capture picks up whatever URL happens
-  // to follow in the document.
-  const splitHeaderCases = [
-    ['URL\n: https://elsewhere.example.com/x', REPORT_URL_RE],
-    ['URL :\nhttps://elsewhere.example.com/y', REPORT_URL_RE],
-    ['Archétype\n: Delivery Manager', REPORT_ARCHETYPE_RE],
-  ];
-  for (const [text, re] of splitHeaderCases) {
-    if (re.test(text)) failures.push(`split-line header parsed as valid: ${JSON.stringify(text)}`);
-  }
-
-  // One case per localized mode that ships its own archetype label, so a mode
-  // renaming its header breaks a named assertion instead of silently emptying
-  // the archetype breakdown.
-  const localeArchetypeCases = [
-    ['Arquétipo: Delivery Manager', 'pt'],
-    ['Arquetipo: Delivery Manager', 'es'],
-    ['Archétype : Delivery Manager', 'fr (accented)'],
-    ['Archetype : Delivery Manager', 'fr (as the mode writes it)'],
-    ['Archetipo: Delivery Manager', 'it'],
-    ['Archetyp: Delivery Manager', 'de, pl'],
-    ['Arketipe: Delivery Manager', 'id'],
-    ['Arketype: Delivery Manager', 'da'],
-    ['Arketip: Delivery Manager', 'tr'],
-    ['Архетип: Delivery Manager', 'ru, ua'],
-  ];
-  for (const [line, locale] of localeArchetypeCases) {
-    const got = REPORT_ARCHETYPE_RE.exec(line)?.[1] ?? null;
-    if (got !== 'Delivery Manager') failures.push(`archetype label for ${locale} → ${JSON.stringify(got)}`);
-  }
-
-  // Block A stays English-only on purpose, so the header fallback is what serves
-  // localized reports. Loosening the Block A cell pattern to accept a suffixed
-  // qualifier ("Archétype détecté") would also match a scoring row whose first
-  // cell merely starts with the word, and capture its weight as the archetype:
-  //   | **Archétype / séniorité** | 25 % | **2.0** | …
-  // That is the leak #3808 closed, reopened from the table side.
-  const scoringRow = '| Archétype / séniorité | 25 % | 2.0 |';
-  if (REPORT_ARCHETYPE_RE.test(scoringRow)) failures.push('archetype pattern matched a scoring table row');
 
   // Via channel analysis (#1596): agency vs direct yield, normalized buckets.
   const viaRows = [
@@ -648,15 +412,6 @@ requirement_importance:
   for (const alias of ['contratado', 'contratada', 'accepted', 'accept']) {
     if (normalizeStatus(alias) !== 'hired') failures.push(`hired: normalizeStatus('${alias}') → ${normalizeStatus(alias)}, expected 'hired'`);
   }
-  // Every submitted status must land in exactly one outcome bucket, and every
-  // bucket must be a declared one — a status added to one list and not the other
-  // would silently vanish from the rates.
-  for (const st of SUBMITTED_STATUSES) {
-    const bucket = classifyOutcome(st);
-    if (!['positive', 'negative', 'awaiting'].includes(bucket)) failures.push(`buckets: '${st}' classifies as '${bucket}', so submitted counts would disagree with the channel-yield pass`);
-  }
-  if (classifyOutcome('Discarded') !== 'discarded' || SUBMITTED_STATUSES.has('discarded')) failures.push('discarded: withdrawn/closed rows must be their own bucket and not count as submitted');
-
   if (!ADVANCED_STATUSES.has('hired')) failures.push('hired: ADVANCED_STATUSES must include hired (a hire advanced past screening)');
   if (!SUBMITTED_STATUSES.has('hired')) failures.push('hired: SUBMITTED_STATUSES must include hired (a hire was submitted)');
   if (!FUNNEL_ORDER.includes('hired')) failures.push('hired: FUNNEL_ORDER must include hired so it prints in the funnel');
@@ -735,18 +490,14 @@ requirement_importance:
     failures.push(`geo blocker aggregation returned ${JSON.stringify(geoBlocker)} against base ${blockerSignals.blockerBase}, expected 2/2 (100%)`);
   }
 
-  // Repeated technology mentions across one report count once per entry, and a
-  // withdrawn/closed ('discarded') row is harvested like a rejected one.
-  const techSignals = buildPatternSignals([
-    { outcome: 'negative', notes: '', report: { gaps: [
-      { description: 'Java is required', severity: 'hard' },
-      { description: 'Production Java and Go experience', severity: 'hard' },
-    ] } },
-    { outcome: 'discarded', notes: '', report: { gaps: [{ description: 'Java is required', severity: 'hard' }] } },
-  ]);
+  // Repeated technology mentions across one report count once per entry.
+  const techSignals = buildPatternSignals([{ outcome: 'negative', notes: '', report: { gaps: [
+    { description: 'Java is required', severity: 'hard' },
+    { description: 'Production Java and Go experience', severity: 'hard' },
+  ] } }]);
   const javaGap = techSignals.techStackGaps.find(g => g.skill === 'Java');
-  if (javaGap?.frequency !== 2) {
-    failures.push(`technology harvest returned ${JSON.stringify(javaGap)}, expected Java frequency 2 (one negative + one discarded row)`);
+  if (javaGap?.frequency !== 1) {
+    failures.push(`technology deduplication returned ${JSON.stringify(javaGap)}, expected Java frequency 1`);
   }
 
   // Empty populations must expose zero bases and no NaN-bearing stats.
@@ -1008,13 +759,13 @@ function parseReport(reportPath) {
   const compRegex = /\|\s*(?:Comp|Salary|Salario|Listed salary)\s*\|\s*(.*?)\s*\|/i;
   const domainRegex = /\|\s*(?:Domain|Dominio|Industry)\s*\|\s*(.*?)\s*\|/i;
 
-  // Fallback: report header field `Archetype: ...` (newer reports use this).
-  const headerArchRegex = REPORT_ARCHETYPE_RE;
+  // Fallback: report header field `Archetype: ...` or `Arquetipo: ...` (newer reports use this).
+  const headerArchRegex = /^(?:Archetype|Arquetipo):\s*(.+?)$/im;
 
   // Report header carries `**URL:**` between Score and PDF (see CLAUDE.md /
   // Pipeline Integrity). Capture the first http(s) URL on that line for vendor
   // detection; reports predating the field simply leave url null (→ unknown bucket).
-  const urlMatch = plain.match(REPORT_URL_RE);
+  const urlMatch = plain.match(/^URL:\s*(https?:\/\/\S+)/im);
   if (urlMatch && !report.url) report.url = urlMatch[1].trim().replace(/[)>\].,]+$/, '');
 
   const archMatch = plain.match(blockARegex) || plain.match(headerArchRegex);
@@ -1187,7 +938,7 @@ function buildPatternSignals(enriched) {
 
   const discardReasonCounts = new Map();
   for (const e of enriched) {
-    if (!REASON_BEARING.has(e.outcome)) continue;
+    if (e.outcome !== 'self_filtered' && e.outcome !== 'negative') continue;
     const notesMatch = (e.notes || '').match(/(?:DISCARD|SKIP):\s*([^,;\n]+)/gi);
     if (!notesMatch) continue;
     const entryReasons = new Set();
@@ -1210,7 +961,7 @@ function buildPatternSignals(enriched) {
 
   const stackGapCounts = new Map();
   for (const e of enriched) {
-    if (!REASON_BEARING.has(e.outcome)) continue;
+    if (e.outcome !== 'negative' && e.outcome !== 'self_filtered') continue;
     if (!e.report?.gaps) continue;
     const entryTechs = new Set();
     for (const gap of e.report.gaps) {
@@ -1409,6 +1160,120 @@ function analyze() {
     citation: 'Bommasani et al., Algorithmic Monocultures in Hiring, FAccT 2026 (arXiv:2605.27371)',
   };
 
+  // --- Archetype breakdown ---
+  const archetypeMap = new Map();
+  for (const e of enriched) {
+    const arch = e.report?.archetype || 'Unknown';
+    if (!archetypeMap.has(arch)) archetypeMap.set(arch, { total: 0, positive: 0, negative: 0, self_filtered: 0, pending: 0 });
+    const entry = archetypeMap.get(arch);
+    entry.total++;
+    entry[e.outcome]++;
+  }
+  const archetypeBreakdown = [...archetypeMap.entries()].map(([archetype, data]) => ({
+    archetype,
+    ...data,
+    conversionRate: data.total > 0 ? Math.round((data.positive / data.total) * 100) : 0,
+  })).sort((a, b) => b.total - a.total);
+
+  // --- Blocker / discard-reason / technology analysis ---
+  // Shared with --self-test so fixtures exercise the production aggregation.
+  const {
+    blockerBase,
+    blockerAnalysis,
+    discardReasonBase,
+    discardReasonStats,
+    techStackGaps,
+    discardReasonRecommendation,
+  } = buildPatternSignals(enriched);
+
+  // --- Remote policy breakdown ---
+  const remoteMap = new Map();
+  for (const e of enriched) {
+    const policy = e.remoteBucket;
+    if (!remoteMap.has(policy)) remoteMap.set(policy, { total: 0, positive: 0, negative: 0, self_filtered: 0, pending: 0 });
+    const entry = remoteMap.get(policy);
+    entry.total++;
+    entry[e.outcome]++;
+  }
+  const remotePolicy = [...remoteMap.entries()].map(([policy, data]) => ({
+    policy,
+    ...data,
+    conversionRate: data.total > 0 ? Math.round((data.positive / data.total) * 100) : 0,
+  })).sort((a, b) => b.total - a.total);
+
+  // --- Company size breakdown ---
+  const sizeMap = new Map();
+  for (const e of enriched) {
+    const size = e.companySize;
+    if (!sizeMap.has(size)) sizeMap.set(size, { total: 0, positive: 0, negative: 0, self_filtered: 0, pending: 0 });
+    const entry = sizeMap.get(size);
+    entry.total++;
+    entry[e.outcome]++;
+  }
+  const companySizeBreakdown = [...sizeMap.entries()].map(([size, data]) => ({
+    size,
+    ...data,
+    conversionRate: data.total > 0 ? Math.round((data.positive / data.total) * 100) : 0,
+  })).sort((a, b) => b.total - a.total);
+
+  // --- ATS vendor / channel analysis (algorithmic-monoculture aware) ---
+  // Motivation: Bommasani et al., "Algorithmic Monocultures in Hiring" (FAccT
+  // 2026, arXiv:2605.27371) — rejections routed through a shared screening
+  // vendor are correlated, not independent. If a concentrated channel yields
+  // nothing, feeding it the same profile has diminishing returns; the rational
+  // move is to divert those companies to referral/direct contact.
+  //
+  // HONESTY: this reports CHANNEL YIELD, not discrimination. A single tracker
+  // can't causally separate "the vendor's algorithm filters me" from "that
+  // vendor skews toward a segment I fit poorly" — but "stop feeding a dead
+  // channel, go around it" is rational under either explanation.
+  //
+  // "Advanced" here is STRICTER than the outcome=='positive' bucket: a bare
+  // 'applied' (submitted, no reply yet) does NOT count as passing screening.
+  const isAdvanced = (e) => ADVANCED_STATUSES.has(e.normalizedStatus);
+
+  // Only applications we actually submitted count toward channel yield (drop
+  // 'evaluated' = never applied, and 'skip' = self-filtered).
+  const submitted = enriched.filter(e => SUBMITTED_STATUSES.has(e.normalizedStatus));
+  const overallAdvanced = submitted.filter(isAdvanced).length;
+  const overallAdvanceRate = submitted.length > 0
+    ? Math.round((overallAdvanced / submitted.length) * 100) : 0;
+
+  const vendorMap = new Map();
+  for (const e of submitted) {
+    const v = e.vendor || 'unknown';
+    if (!vendorMap.has(v)) vendorMap.set(v, { total: 0, advanced: 0 });
+    const entry = vendorMap.get(v);
+    entry.total++;
+    if (isAdvanced(e)) entry.advanced++;
+  }
+
+  // Recommendations only fire on buckets with enough n to not be noise; the
+  // breakdown still SHOWS every bucket (with its n) so nothing is hidden.
+  const vendorBreakdown = [...vendorMap.entries()]
+    .filter(([v]) => v !== 'unknown')
+    .map(([vendor, data]) => ({
+      vendor,
+      total: data.total,
+      advanced: data.advanced,
+      advanceRate: data.total > 0 ? Math.round((data.advanced / data.total) * 100) : 0,
+      sharePct: submitted.length > 0 ? Math.round((data.total / submitted.length) * 100) : 0,
+      sufficientSample: data.total >= MIN_VENDOR_N,
+    }))
+    .sort((a, b) => b.total - a.total);
+
+  const identifiedCount = submitted.length - (vendorMap.get('unknown')?.total || 0);
+  const vendorAnalysis = {
+    scope: ['greenhouse', 'lever', 'ashby', 'workday', 'icims'],
+    minSampleForClaim: MIN_VENDOR_N,
+    submitted: submitted.length,
+    identified: identifiedCount,
+    coveragePct: submitted.length > 0 ? Math.round((identifiedCount / submitted.length) * 100) : 0,
+    overallAdvanceRate,
+    breakdown: vendorBreakdown,
+    citation: 'Bommasani et al., Algorithmic Monocultures in Hiring, FAccT 2026 (arXiv:2605.27371)',
+  };
+
   // --- Via channel analysis (#1596 follow-up): per-agency advance rate ---
   // Same honesty rules as the vendor analysis above: this reports CHANNEL
   // YIELD. In an agency-mediated search the highest-leverage decision is which
@@ -1418,7 +1283,17 @@ function analyze() {
   const viaChannelAnalysis = buildViaChannelAnalysis(submitted, isAdvanced);
 
   // --- Score threshold analysis ---
-  const scoreThreshold = scoreThresholdFrom(scoresByOutcome.positive, scoresByOutcome.negative);
+  const positiveScores = scoresByOutcome.positive.filter(s => s > 0);
+  const minPositiveScore = positiveScores.length > 0 ? Math.min(...positiveScores) : 0;
+  const scoreThreshold = {
+    recommended: minPositiveScore > 0 ? Math.floor(minPositiveScore * 10) / 10 : 3.5,
+    reasoning: positiveScores.length > 0
+      ? `Lowest score among positive outcomes is ${minPositiveScore}. No applications below this score led to progress.`
+      : 'Not enough positive outcome data to determine threshold.',
+    positiveRange: positiveScores.length > 0
+      ? `${Math.min(...positiveScores)} - ${Math.max(...positiveScores)}`
+      : 'N/A',
+  };
 
   // --- Generate recommendations ---
   const recommendations = [];
@@ -1468,6 +1343,45 @@ function analyze() {
     recommendations.push({
       action: `Avoid "${worstRemote.policy}" roles (0 of ${worstRemote.decided} decided outcomes advanced, ${worstRemote.submitted} sent)`,
       reasoning: `None of the ${worstRemote.decided} decided applications with "${worstRemote.policy}" policy led to progress.`,
+      impact: 'medium',
+    });
+  }
+
+  // Channel-monoculture recommendation: a concentrated vendor (>= 25% of
+  // submissions, sufficient sample) whose advance rate is well below EVERY OTHER
+  // channel is a dead channel worth routing around, not re-feeding. The baseline
+  // is leave-one-out (this vendor vs all other submissions) — comparing to an
+  // overall rate that INCLUDES the vendor understates the gap when it dominates.
+  let deadChannel = null;
+  for (const v of vendorBreakdown) {
+    if (!v.sufficientSample || v.sharePct < 25) continue;
+    const others = submitted.filter(e => (e.vendor || 'unknown') !== v.vendor);
+    if (others.length === 0) continue;
+    const othersRate = Math.round((others.filter(isAdvanced).length / others.length) * 100);
+    // Meaningful gap only: the rest of the pipeline must be doing at least
+    // moderately better, so we're not flagging a uniformly cold market.
+    if (v.advanceRate < othersRate && othersRate - v.advanceRate >= 10) {
+      if (!deadChannel || v.advanceRate < deadChannel.advanceRate) deadChannel = { ...v, othersRate };
+    }
+  }
+  if (deadChannel) {
+    recommendations.push({
+      action: `Route ${deadChannel.vendor} companies through referral / direct contact -- ${deadChannel.sharePct}% of your applications flow through it at a ${deadChannel.advanceRate}% advance rate (vs ${deadChannel.othersRate}% through other channels)`,
+      reasoning: `${deadChannel.advanced}/${deadChannel.total} ${deadChannel.vendor} applications advanced past screening, well below your other channels. Under algorithmic monoculture (Bommasani et al., FAccT 2026) a shared screener's rejections are correlated -- re-applying the same profile through the same engine has diminishing returns; a human channel bypasses it. Channel yield, not a discrimination claim.`,
+      impact: 'high',
+    });
+  }
+
+  // Best-converting agency (#1596 follow-up): with a sufficient sample and a
+  // clear lead over the overall pipeline, that recruiter relationship is worth
+  // prioritizing. One recommendation at most — the breakdown shows the rest.
+  const topAgency = viaChannelAnalysis.breakdown
+    .filter(a => a.sufficientSample && a.advanced > 0 && a.advanceRate >= overallAdvanceRate + 10)
+    .sort((a, b) => b.advanceRate - a.advanceRate)[0];
+  if (topAgency) {
+    recommendations.push({
+      action: `Prioritize roles via ${topAgency.agency} -- ${topAgency.advanceRate}% advance rate across ${topAgency.total} submissions (overall: ${overallAdvanceRate}%)`,
+      reasoning: `${topAgency.advanced}/${topAgency.total} applications through ${topAgency.agency} advanced past screening, well above your overall rate. In an agency-mediated search the highest-leverage decision is which recruiter relationships to invest in -- this one converts. Channel yield, not a causal claim.`,
       impact: 'medium',
     });
   }
@@ -1610,7 +1524,7 @@ function printSummary(result) {
 
   // Discard reasons
   if (discardReasonStats && discardReasonStats.length > 0) {
-    console.log(`\nTOP DISCARD / SKIP REASONS (of ${result.discardReasonBase} self-filtered / discarded / negative entries)`);
+    console.log(`\nTOP DISCARD / SKIP REASONS (of ${result.discardReasonBase} self-filtered/negative entries)`);
     console.log('-'.repeat(40));
     for (const d of discardReasonStats.slice(0, 10)) {
       console.log(`  ${d.reason.padEnd(30)} ${String(d.frequency).padStart(2)}x (${d.percentage}%)`);
@@ -1671,12 +1585,12 @@ function printSummary(result) {
   console.log('');
 }
 
-// --- Run (CLI only; guarded so the module is safely importable for tests) ---
-if (isMainModule(import.meta.url)) {
-  validateFlags(args, KNOWN_FLAGS, USAGE, {
-    valueFlags: VALUE_FLAGS,
-    requireOperand: true,
-  });
+// --- Run ---
+if (args.includes('--self-test')) {
+  runSelfTest();
+}
+
+const result = analyze();
 
   if (args.includes('--self-test')) {
     runSelfTest();

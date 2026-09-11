@@ -16,11 +16,10 @@
 
 import { readFileSync, existsSync, mkdirSync } from "fs";
 import { dirname, resolve, join, relative, isAbsolute } from "path";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 import { parseArgs } from "util";
 import { assertFacts } from "./verify-cv-facts.mjs";
 import { resolveTemplate } from "./cv-templates.mjs";
-import { isMainModule } from "./lib/is-main-module.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUTPUT_ROOT = resolve(__dirname, "output");
@@ -325,11 +324,6 @@ Usage:
     // validator before importing Playwright or writing a PDF so a failed gate
     // cannot leave behind a misleading artifact.
     const factCheck = assertFacts(html, { label: "cover letter" });
-    // Ahead of the verdict, because it qualifies it: with no config the phrase
-    // lists are empty, so a silent gate here covers metrics and facts only.
-    if (factCheck.configMissing) {
-      console.error("No config/cv-facts.json — forbidden/advisory phrase checks did not run.");
-    }
     if (factCheck.verdict === "warn") {
       console.error(`CV fact check warning: cover letter`);
       for (const phrase of factCheck.warnings) {
@@ -353,5 +347,5 @@ Usage:
   }
 }
 
-const isMain = isMainModule(import.meta.url);
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) main();

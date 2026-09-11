@@ -116,8 +116,6 @@ async function loadProviderIds() {
   return ids;
 }
 
-const TITLE_FILTER_FIELDS = ['positive', 'negative', 'seniority_boost'];
-
 export async function validatePortalsConfig(config, { providerIds = new Set() } = {}) {
   const errors = [];
   const warnings = [];
@@ -134,31 +132,6 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
       validateKeywordList(config.title_filter.positive, 'title_filter.positive', errors);
       validateKeywordList(config.title_filter.negative, 'title_filter.negative', errors);
       validateKeywordList(config.title_filter.seniority_boost, 'title_filter.seniority_boost', errors);
-    }
-  }
-
-  // Optional per-scanner override consumed only by scan-ats-full.mjs. Same
-  // shape as title_filter, so it gets the same structural checks — an
-  // unvalidated key would let a typo ("positve") silently resolve to a
-  // profile with no positive keywords, which matches every posting.
-  if (config.title_filter_full !== undefined) {
-    if (!isObject(config.title_filter_full)) {
-      add(errors, 'title_filter_full', 'title_filter_full must be an object');
-    } else {
-      // A misspelled field is the dangerous case, not a missing one:
-      // `positve:` leaves `positive` undefined, buildTitleFilter treats an
-      // empty positive list as "no positive constraint", and the sweep then
-      // matches every title on every board — the exact outcome this key
-      // exists to prevent. An unknown field is therefore an error, while
-      // `positive: []` stays valid as a deliberate choice.
-      for (const key of Object.keys(config.title_filter_full)) {
-        if (!TITLE_FILTER_FIELDS.includes(key)) {
-          add(errors, `title_filter_full.${key}`, `unknown title_filter_full field - expected one of ${TITLE_FILTER_FIELDS.join(', ')}`);
-        }
-      }
-      validateKeywordList(config.title_filter_full.positive, 'title_filter_full.positive', errors);
-      validateKeywordList(config.title_filter_full.negative, 'title_filter_full.negative', errors);
-      validateKeywordList(config.title_filter_full.seniority_boost, 'title_filter_full.seniority_boost', errors);
     }
   }
 
@@ -224,53 +197,46 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
     add(errors, 'search_queries', 'search_queries must be an array when set');
   }
 
-  // tracked_companies and job_boards share one entry schema (name / careers_url /
-  // api / provider / parser) and one dedup namespace downstream, so validate them
-  // in a single pass. seenEnabledNames spans both lists: a board and a company
-  // that share a name would still collide in the scanner's reporting.
+  const companies = config.tracked_companies;
+  if (companies !== undefined && !Array.isArray(companies)) {
+    add(errors, 'tracked_companies', 'tracked_companies must be an array when set');
+  }
+
   const seenEnabledNames = new Map();
-  const validateEntryList = (list, key, noun) => {
-    if (list === undefined) return;
-    if (!Array.isArray(list)) {
-      add(errors, key, `${key} must be an array when set`);
-      return;
-    }
-    for (const [idx, entry] of list.entries()) {
-      const base = `${key}[${idx}]`;
-      if (!isObject(entry)) {
-        add(errors, base, `${noun} entry must be an object`);
+  if (Array.isArray(companies)) {
+    for (const [idx, company] of companies.entries()) {
+      const base = `tracked_companies[${idx}]`;
+      if (!isObject(company)) {
+        add(errors, base, 'company entry must be an object');
         continue;
       }
-      if (entry.enabled === false) continue;
+      if (company.enabled === false) continue;
 
-      if (typeof entry.name !== 'string' || entry.name.trim() === '') {
-        add(errors, `${base}.name`, `enabled ${noun} must have a non-empty string name`);
+      if (typeof company.name !== 'string' || company.name.trim() === '') {
+        add(errors, `${base}.name`, 'enabled company must have a non-empty string name');
       } else {
-        const normalized = normalizeName(entry.name);
+        const normalized = normalizeName(company.name);
         if (seenEnabledNames.has(normalized)) {
-          add(warnings, `${base}.name`, `duplicate enabled ${noun} name also seen at ${seenEnabledNames.get(normalized)}`);
+          add(warnings, `${base}.name`, `duplicate enabled company name also seen at ${seenEnabledNames.get(normalized)}`);
         } else {
           seenEnabledNames.set(normalized, `${base}.name`);
         }
       }
 
-      validateUrl(entry.careers_url, `${base}.careers_url`, errors);
-      validateUrl(entry.api, `${base}.api`, errors);
+      validateUrl(company.careers_url, `${base}.careers_url`, errors);
+      validateUrl(company.api, `${base}.api`, errors);
 
-      if (entry.provider !== undefined) {
-        if (typeof entry.provider !== 'string' || entry.provider.trim() === '') {
+      if (company.provider !== undefined) {
+        if (typeof company.provider !== 'string' || company.provider.trim() === '') {
           add(errors, `${base}.provider`, 'provider must be a non-empty string when set');
-        } else if (!providerIds.has(entry.provider)) {
-          add(errors, `${base}.provider`, `unknown provider "${entry.provider}"`);
+        } else if (!providerIds.has(company.provider)) {
+          add(errors, `${base}.provider`, `unknown provider "${company.provider}"`);
         }
       }
 
-      validateParser(entry.parser, `${base}.parser`, errors);
+      validateParser(company.parser, `${base}.parser`, errors);
     }
-  };
-
-  validateEntryList(config.tracked_companies, 'tracked_companies', 'company');
-  validateEntryList(config.job_boards, 'job_boards', 'job board');
+  }
 
   return { errors, warnings };
 }

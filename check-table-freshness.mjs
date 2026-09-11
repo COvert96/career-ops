@@ -47,20 +47,16 @@
  *      node check-table-freshness.mjs --today 2026-10-02 (deterministic date for tests)
  *      node check-table-freshness.mjs --self-test
  *
- * Issue #2036 — github.com/career-ops-hq/career-ops
+ * Issue #2036 — github.com/santifer/career-ops
  */
 
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
-import { localToday } from './lib/local-today.mjs';
-import { isMainModule } from './lib/is-main-module.mjs';
-import { getCareerOpsRoot } from './path-resolver.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const DATA_ROOT = getCareerOpsRoot();
 const TEMPLATES_DIR = join(CAREER_OPS, 'templates');
 const DEFAULT_MAX_AGE_MONTHS = 12;
 
@@ -289,7 +285,7 @@ function loadTables(dir = TEMPLATES_DIR) {
 // partially parsed or silently swallowed: months stays null (default applies)
 // and a warning entry reports the rejected value.
 function loadConfigMaxAge() {
-  const profilePath = join(DATA_ROOT, 'config/profile.yml');
+  const profilePath = join(CAREER_OPS, 'config/profile.yml');
   if (!existsSync(profilePath)) return { months: null, warning: null };
   try {
     const profile = yaml.load(readFileSync(profilePath, 'utf-8'));
@@ -561,7 +557,7 @@ function runSelfTest() {
 }
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
-if (isMainModule(import.meta.url)) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
   if (selfTestMode) {
     runSelfTest();
@@ -575,10 +571,7 @@ if (isMainModule(import.meta.url)) {
       process.exit(1);
     }
   } else {
-    // LOCAL day. `expired` exits 1, so the UTC day failed CI a day early for
-    // anyone west of Greenwich and passed a stale table a day late for anyone
-    // east of it (#3070). --today still overrides for deterministic runs.
-    todayDate = parseDate(localToday());
+    todayDate = parseDate(new Date().toISOString().slice(0, 10));
   }
 
   // Precedence: --max-age-months flag > config table_freshness.max_age_months > default 12.
